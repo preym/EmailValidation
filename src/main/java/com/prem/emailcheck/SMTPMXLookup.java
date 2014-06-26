@@ -1,5 +1,7 @@
 package com.prem.emailcheck;
 
+import org.apache.poi.hssf.usermodel.HSSFSheet;
+import org.apache.poi.hssf.usermodel.HSSFWorkbook;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.xssf.usermodel.XSSFSheet;
@@ -13,19 +15,19 @@ import javax.naming.directory.DirContext;
 import javax.naming.directory.InitialDirContext;
 import java.io.*;
 import java.net.Socket;
-import java.util.ArrayList;
-import java.util.Hashtable;
-import java.util.Iterator;
+import java.util.*;
 
 public class SMTPMXLookup {
 
 
-  public static ArrayList<String> testData = new ArrayList<String>();
+  private static ArrayList<String> testData = new ArrayList<String>();
+  private static HSSFWorkbook workbook = new HSSFWorkbook();
+  private static HSSFSheet sheet = workbook.createSheet("Sheet1");
+  private static int rownum = 0;
 
   private static int hear(BufferedReader in) throws IOException {
     String line = null;
     int res = 0;
-
     while ((line = in.readLine()) != null) {
       String pfx = line.substring(0, 3);
       try {
@@ -43,7 +45,6 @@ public class SMTPMXLookup {
       throws IOException {
     wr.write(text + "\r\n");
     wr.flush();
-
     return;
   }
 
@@ -57,7 +58,6 @@ public class SMTPMXLookup {
     Attributes attrs = ictx.getAttributes
         (hostName, new String[]{"MX"});
     Attribute attr = attrs.get("MX");
-
     // if we don't have an MX record, try the machine itself
     if ((attr == null) || (attr.size() == 0)) {
       attrs = ictx.getAttributes(hostName, new String[]{"A"});
@@ -83,7 +83,6 @@ public class SMTPMXLookup {
         mailhost = f[1].substring(0, (f[1].length() - 1));
       else
         mailhost = f[1];
-      //  THE fix *************
       res.add(mailhost);
     }
     return res;
@@ -92,10 +91,8 @@ public class SMTPMXLookup {
   public static boolean isAddressValid(String address) {
     // Find the separator for the domain name
     int pos = address.indexOf('@');
-
     // If the address does not contain an '@', it's not valid
     if (pos == -1) return false;
-
     // Isolate the domain/machine name and get a list of mail exchangers
     String domain = address.substring(++pos);
     ArrayList mxList = null;
@@ -104,11 +101,9 @@ public class SMTPMXLookup {
     } catch (NamingException ex) {
       return false;
     }
-
     // Just because we can send mail to the domain, doesn't mean that the
     // address is valid, but if we can't, it's a sure sign that it isn't
     if (mxList.size() == 0) return false;
-
     // Now, do the SMTP validation, try each mail exchanger until we get
     // a positive acceptance. It *MAY* be possible for one MX to allow
     // a message [store and forwarder for example] and another [like
@@ -118,7 +113,6 @@ public class SMTPMXLookup {
       boolean valid = false;
       try {
         int res;
-        //
         Socket skt = new Socket((String) mxList.get(mx), 25);
         BufferedReader rdr = new BufferedReader
             (new InputStreamReader(skt.getInputStream()));
@@ -146,8 +140,7 @@ public class SMTPMXLookup {
         say(wtr, "QUIT");
         hear(rdr);
         if (res != 250)
-          throw new Exception("Address is not valid!");
-
+          throw new Exception(address + "  Address is not valid!");
         valid = true;
         rdr.close();
         wtr.close();
@@ -156,25 +149,17 @@ public class SMTPMXLookup {
         // Do nothing but try next host
         ex.printStackTrace();
       } finally {
-        if (valid) return true;
+        if (valid) {
+          writeFileData(address);
+          return true;
+        }
       }
     }
     return false;
   }
 
   public static void main(String args[]) {
-//    String testData[] = {
-//        "real@rgagnon.com",
-//        "you@acquisto.net",
-//        "fail.me@nowhere.spam", // Invalid domain name
-//        "arkham@bigmeanogre.net", // Invalid address
-//        "pre@eggheadcreative.com", // Invalid address
-//        "nosuchaddress@yahoo.com" // Failure of this method
-//    };
-
-
     readFileData();
-
     for (int ctr = 0; ctr < testData.size(); ctr++) {
       System.out.println(testData.get(ctr) + " is valid? " +
           isAddressValid(testData.get(ctr)));
@@ -184,7 +169,6 @@ public class SMTPMXLookup {
 
   private static void readFileData() {
     try {
-
       FileInputStream file = new FileInputStream(new File("./input.xlsx"));
       XSSFWorkbook workbook = new XSSFWorkbook(file);
       XSSFSheet sheet = workbook.getSheetAt(0);
@@ -192,30 +176,32 @@ public class SMTPMXLookup {
       while (rowIterator.hasNext()) {
         Row row = rowIterator.next();
         Iterator<Cell> cellIterator = row.cellIterator();
-        while (cellIterator.hasNext()) {
+        if (cellIterator.hasNext()) {
           Cell cell = cellIterator.next();
-//          switch (cell.getCellType()) {
-//            case Cell.CELL_TYPE_BOOLEAN:
-//              System.out.print(cell.getBooleanCellValue() + "\t\t");
-//              break;
-//            case Cell.CELL_TYPE_NUMERIC:
-//              System.out.print(cell.getNumericCellValue() + "\t\t");
-//              break;
-//            case Cell.CELL_TYPE_STRING:
-          System.out.print(cell.getStringCellValue() + "\t\t");
+          System.out.println(cell.getStringCellValue());
           testData.add(cell.getStringCellValue());
-
-//              break;
-//          }
         }
-        System.out.println("");
       }
       file.close();
+      System.out.println("Reading completed. Your Input is:\n" + testData);
+    } catch (FileNotFoundException e) {
+      e.printStackTrace();
+    } catch (IOException e) {
+      e.printStackTrace();
+    }
+  }
+
+
+  private static void writeFileData(String email) {
+    Row row = sheet.createRow(rownum++);
+    Cell cell = row.createCell(0);
+    cell.setCellValue(email);
+    try {
       FileOutputStream out =
-          new FileOutputStream(new File("/output.xls"));
+          new FileOutputStream(new File("./output.xls"));
       workbook.write(out);
       out.close();
-
+      System.out.println("Excel written successfully..");
     } catch (FileNotFoundException e) {
       e.printStackTrace();
     } catch (IOException e) {
